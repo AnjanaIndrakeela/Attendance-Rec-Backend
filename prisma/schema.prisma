@@ -29,6 +29,12 @@ model Player {
     id                String             @id @default(cuid())
     name              String
     jerseyNumber      Int                @unique
+    position          String?
+    birthday          DateTime?
+    batch             String?
+    department        String?
+    faculty           String?
+    imageUrl          String?            @db.Text
     registeredDate    DateTime           @default(now())
     attendanceRecords AttendanceRecord[]
     createdAt         DateTime           @default(now())
@@ -38,6 +44,8 @@ model Player {
 model Session {
     id                String             @id @default(cuid())
     date              DateTime
+    startTime         DateTime?
+    endTime           DateTime?
     status            SessionStatus      @default(OPEN)
     priority          SessionPriority
     attendanceRecords AttendanceRecord[]

@@ -23,12 +23,14 @@ app.get("/api/players", async (_request, response, next) => {
 app.post("/api/players", async (request, response, next) => {
     try {
         const entries = Array.isArray(request.body) ? request.body : request.body.players ?? [request.body];
-        if (!entries.length || entries.some((player: { name?: string; jerseyNumber?: number }) => !player.name || player.jerseyNumber === undefined)) {
-            response.status(400).json({ error: "Each player needs a name and jersey number." });
+        type PlayerInput = { name?: string; jerseyNumber?: number; position?: string; birthday?: string; batch?: string; department?: string; faculty?: string; imageUrl?: string };
+        const validBatches = new Set(["23", "24", "25", "26"]);
+        if (!entries.length || entries.some((player: PlayerInput) => !player.name || player.jerseyNumber === undefined || !player.position || !player.birthday || !player.batch || !validBatches.has(player.batch) || !player.department || !player.faculty)) {
+            response.status(400).json({ error: "Each player needs name, jersey number, position, birthday, batch, department, and faculty." });
             return;
         }
-        const players = await prisma.$transaction(entries.map((player: { name: string; jerseyNumber: number; registeredDate?: string }) => prisma.player.create({
-            data: { name: player.name.trim(), jerseyNumber: Number(player.jerseyNumber), registeredDate: player.registeredDate ? new Date(player.registeredDate) : undefined },
+        const players = await prisma.$transaction(entries.map((player: PlayerInput) => prisma.player.create({
+            data: { name: player.name!.trim(), jerseyNumber: Number(player.jerseyNumber), position: player.position!.trim(), birthday: new Date(player.birthday!), batch: player.batch!, department: player.department!.trim(), faculty: player.faculty!.trim(), imageUrl: player.imageUrl || null },
         })));
         response.status(201).json(players);
     } catch (error) { next(error); }
@@ -42,12 +44,18 @@ app.get("/api/sessions", async (_request, response, next) => {
 
 app.post("/api/sessions", async (request, response, next) => {
     try {
-        const { date, priority } = request.body as { date?: string; priority?: string };
-        if (!date || !priority || !priorities.has(priority as SessionPriority)) {
-            response.status(400).json({ error: "A date and valid priority are required." });
+        const { date, startTime, endTime, priority } = request.body as { date?: string; startTime?: string; endTime?: string; priority?: string };
+        if (!date || !startTime || !endTime || !priority || !priorities.has(priority as SessionPriority)) {
+            response.status(400).json({ error: "A date, start time, end time, and valid session type are required." });
             return;
         }
-        response.status(201).json(await prisma.session.create({ data: { date: new Date(date), priority: priority as SessionPriority } }));
+        const startDate = new Date(`${date}T${startTime}:00`);
+        const endDate = new Date(`${date}T${endTime}:00`);
+        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || endDate <= startDate) {
+            response.status(400).json({ error: "The end time must be later than the start time." });
+            return;
+        }
+        response.status(201).json(await prisma.session.create({ data: { date: startDate, startTime: startDate, endTime: endDate, priority: priority as SessionPriority } }));
     } catch (error) { next(error); }
 });
 
@@ -128,7 +136,7 @@ app.get("/api/reports", async (request, response, next) => {
             const denominator = Math.max(eligibleSessions.length - excused, 0);
             const present = records.filter((record) => record.status === "PRESENT").length;
             const late = records.filter((record) => record.status === "LATE").length;
-            return { playerId: player.id, name: player.name, jerseyNumber: player.jerseyNumber, eligibleSessions: denominator, present, late, absent: Math.max(denominator - present - late, 0), excused, percentage: denominator ? Math.round(((present + late) / denominator) * 1000) / 10 : 0 };
+            return { playerId: player.id, name: player.name, jerseyNumber: player.jerseyNumber, position: player.position, imageUrl: player.imageUrl, eligibleSessions: denominator, present, late, absent: Math.max(denominator - present - late, 0), excused, percentage: denominator ? Math.round(((present + late) / denominator) * 1000) / 10 : 0 };
         });
         response.json({ priority, sessions: sessions.length, report });
     } catch (error) { next(error); }
@@ -136,6 +144,10 @@ app.get("/api/reports", async (request, response, next) => {
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
     console.error(error);
+    if (error instanceof Error && error.message.includes("Can't reach database server")) {
+        response.status(503).json({ error: "Database unavailable. Start PostgreSQL and try again." });
+        return;
+    }
     response.status(500).json({ error: "Internal server error." });
 });
 
